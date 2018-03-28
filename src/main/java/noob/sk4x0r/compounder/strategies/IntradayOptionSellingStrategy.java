@@ -37,7 +37,7 @@ public class IntradayOptionSellingStrategy extends Strategy {
 
     protected void test() throws Exception{
                 List<Long> startTimes = new ArrayList<>();
-        for(long i = 940; i <= 1020; i=i+10){
+        for(long i = 950; i <= 1010; i=i+10){
             if(i%100 < 60){
                 startTimes.add(i);
             }
@@ -50,38 +50,24 @@ public class IntradayOptionSellingStrategy extends Strategy {
         }
 
         List<Long> stopLosses = new ArrayList<>();
-        for(long i = 125; i <= 200; i=i+10){
+        for(long i = 110; i <= 200; i=i+5){
             stopLosses.add(i);
         }
 
-        List<Long> moneynessList = new ArrayList<>();
-        for(long i = -50000; i <=50000 ; i=i+10000){
-            moneynessList.add(i);
-        }
-
         ExecutorService es = Executors.newFixedThreadPool(16);
-        for(long startTime:startTimes){
-            for(long endTime:endTimes){
-                for(long stopLoss:stopLosses) {
-                    for(long moneyness:moneynessList) {
-                        for (boolean squareOffBothPositions : Arrays.asList(false)) {
-                            for(boolean tradeCurrentExpiryOnThursday: Arrays.asList(true)) {
-                                for (boolean tradeOnFriday : Arrays.asList(true)) {
-                                    if (startTime < endTime) {
-                                        es.execute(() -> {
-                                            IntradayOptionSellingStrategy strategy = new IntradayOptionSellingStrategy();
-                                            try {
-                                                strategy.test(startTime, endTime, moneyness, stopLoss, squareOffBothPositions, tradeCurrentExpiryOnThursday, tradeOnFriday);
-//                                                System.out.print(".");
-                                            } catch (Exception e) {
-                                                e.printStackTrace();
-                                            }
-                                        });
+        for (long startTime : startTimes) {
+            for (long endTime : endTimes) {
+                for (long stopLoss : stopLosses) {
+                            if (startTime < endTime) {
+                                es.execute(() -> {
+                                    IntradayOptionSellingStrategy strategy = new IntradayOptionSellingStrategy();
+                                    try {
+                                        strategy.test(startTime, endTime, stopLoss);
+                                    } catch (Exception e) {
+                                        e.printStackTrace();
                                     }
-                                }
+                                });
                             }
-                        }
-                    }
                 }
             }
         }
@@ -94,11 +80,7 @@ public class IntradayOptionSellingStrategy extends Strategy {
 
     protected void test(long startTime,
                         long endTime,
-                        long moneyness,
-                        long stopLoss,
-                        boolean squareOffBothPositions,
-                        boolean tradeCurrentExpiryOnThursday,
-                        boolean tradeOnFriday) throws Exception {
+                        long stopLoss) throws Exception {
         try(Connection connection = ScriptDataCommands.getConncection()) {
             PreparedStatement preparedStatement = connection.prepareStatement("Select distinct date from " + TABLE_NAME + " order by date");
             ResultSet resultSet = preparedStatement.executeQuery();
@@ -106,86 +88,54 @@ public class IntradayOptionSellingStrategy extends Strategy {
             while (resultSet.next()) {
                 dates.add(resultSet.getLong(1));
             }
-            if (!tradeOnFriday) {
-                Iterator<Long> dateIterator = dates.iterator();
-                while (dateIterator.hasNext()) {
-                    Long date = dateIterator.next();
-                    if (getDate(date).getDayOfWeek() == 5) {
-                        dateIterator.remove();
-                    }
-                }
-            }
             for (Long date : dates) {
                 List<CandleStickOptionData> calls = getCandles("CE", date, startTime);
                 List<CandleStickOptionData> puts = getCandles("PE", date, startTime);
                 ShortStrangle shortStrangle = getShortStrangle(calls,
                         puts,
-                        moneyness,
                         date,
                         startTime,
                         endTime,
-                        stopLoss,
-                        squareOffBothPositions,
-                        tradeCurrentExpiryOnThursday);
+                        stopLoss);
                 addTrade(shortStrangle);
             }
         }
-//        printSummary(startTime, endTime, moneyness, stopLoss, squareOffBothPositions, tradeCurrentExpiryOnThursday, tradeOnFriday);
+//        printSummary(startTime, endTime, stopLoss);
         printDayWiseSummary();
 //        System.out.println(summarize());
 //        System.out.println(startTime + " " + endTime + " " + premium + " " + stopLoss + " " + squareOffBothPositions + " " + getTotalProfit()/(double)100 + " " + getMaxDrawdown()/(double)100);
-        printTrades();
+        //printTrades();
     }
 
     private ShortStrangle getShortStrangle(List<CandleStickOptionData> calls,
                                            List<CandleStickOptionData> puts,
-                                           long moneyness,
                                            long date,
                                            long startTime,
                                            long endTime,
-                                           long stopLoss,
-                                           boolean squareOffBothPositions,
-                                           boolean tradeCurrentExpiryOnThursday) throws SQLException, ParseException {
-        ShortTrade putTrade = getTrade(puts, moneyness, date, startTime, endTime, stopLoss, tradeCurrentExpiryOnThursday);
-        ShortTrade callTrade = getTrade(calls, moneyness, date, startTime, endTime, stopLoss, tradeCurrentExpiryOnThursday);
-        if(null == putTrade || null == callTrade){
-            return null;
-        }
-        if(squareOffBothPositions) {
-            if (getTimeFromDateTime(putTrade.getBuyTs()) < getTimeFromDateTime(callTrade.getBuyTs())) {
-                callTrade = getTrade(calls, moneyness, date, startTime, getTimeFromDateTime(putTrade.getBuyTs()), 10000, tradeCurrentExpiryOnThursday);
-            } else if (getTimeFromDateTime(putTrade.getBuyTs()) < getTimeFromDateTime(callTrade.getBuyTs())) {
-                putTrade = getTrade(puts, moneyness, date, startTime, getTimeFromDateTime(callTrade.getBuyTs()), 10000, tradeCurrentExpiryOnThursday);
-            }
-        }
+                                           long stopLoss) throws SQLException, ParseException {
+        ShortTrade putTrade = getTrade(puts, date, startTime, endTime, stopLoss);
+        ShortTrade callTrade = getTrade(calls, date, startTime, endTime, stopLoss);
         if(null == putTrade || null == callTrade){
             return null;
         }
         return ShortStrangle.builder()
                 .call(callTrade)
                 .put(putTrade)
-                .moneyNess(moneyness)
                 .stopLoss(stopLoss)
                 .time(getDateTime(date, startTime))
                 .build();
     }
 
-    private boolean isValidExpiry(CandleStickOptionData candle, boolean tradeCurrentExpiryOnThursday){
+    private boolean isValidExpiry(CandleStickOptionData candle){
         int daysToExpity = Days.daysBetween(candle.getDateTime().toLocalDate(), candle.getExpiry().toLocalDate()).getDays();
-        if(tradeCurrentExpiryOnThursday) {
-            return daysToExpity >= 0 && daysToExpity < 7;
-        }else {
-            return daysToExpity > 0 && daysToExpity <= 7;
-        }
+        return daysToExpity >= 0 && daysToExpity < 7;
     }
 
     private ShortTrade getTrade(List<CandleStickOptionData> candles,
-                                long moneyness,
                                 long date,
                                 long startTime,
                                 long endTime,
-                                long stopLoss,
-                                boolean tradeCurrentExpiryOnThursday) throws SQLException, ParseException {
+                                long stopLoss) throws SQLException, ParseException {
         if(candles.size() == 0){
             return null;
         }
@@ -208,30 +158,19 @@ public class IntradayOptionSellingStrategy extends Strategy {
             }
 
             CandleStickOptionData openingTrade = null;
-            Long minDiff = Long.MAX_VALUE;
-
             Long strikePrice = null;
-            if ("PUT".equalsIgnoreCase(candles.get(0).getType())) {
-                strikePrice = ((bankNifty + 10000) - (bankNifty % 10000) - moneyness) / 100;
-            } else {
-                strikePrice = (bankNifty - (bankNifty % 10000) + moneyness) / 100;
-
+            if(bankNifty - 5000 < bankNifty / 10000 * 10000 ){
+                strikePrice = (bankNifty - (bankNifty % 10000))/100;
+            }else{
+                strikePrice = (bankNifty - (bankNifty % 10000) + 10000)/100;
             }
-//        Long putStrikePrice = (bankNifty + 100) % 100 - premium;
-//        Long callStrikePrice = (bankNifty ) % 100 + premium;
 
             for (CandleStickOptionData candle : candles) {
-//            Long premium = new Double(premiumPercentage * bankNifty / (double) 10000).longValue();
-//            if(Math.abs(premium - candle.getClose()) < minDiff && isValidExpiry(candle, tradeCurrentExpiryOnThursday)){
-//                minDiff = Math.abs(premium - candle.getClose());
-//                openingTrade = candle;
-//            }
-                if (strikePrice.longValue() == candle.getStrikePrice().longValue() && isValidExpiry(candle, tradeCurrentExpiryOnThursday)) {
+                if (strikePrice.longValue() == candle.getStrikePrice().longValue() && isValidExpiry(candle)) {
                     openingTrade = candle;
                     break;
                 }
             }
-
 
             if (null == openingTrade) {
                 return null;

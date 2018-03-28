@@ -179,23 +179,15 @@ public abstract class Strategy {
 
     public void printSummary(long startTime,
                              long endTime,
-                             long premium,
-                             long stopLoss,
-                             boolean squareOffBothPositions,
-                             boolean tradeCurrentExpiryOnThursday,
-                             boolean tradeOnFriday){
+                             long stopLoss){
         SummaryStatistics summaryStatistics = new SummaryStatistics();
         for (ShortStrangle shortStrangle : shortStrangleList) {
             summaryStatistics.addValue(shortStrangle.getProfit());
         }
-        System.out.printf("%5d\t%5d\t%3d\t%3d\t%5s\t%5s\t%5s\t%10.2f\t%10.2f\t%10.2f\n",
+        System.out.printf("%5d\t%5d\t%3d\t%10.2f\t%10.2f\t%10.2f\n",
                 startTime,
                 endTime,
-                premium,
                 stopLoss,
-                squareOffBothPositions,
-                tradeCurrentExpiryOnThursday,
-                tradeOnFriday,
                 summaryStatistics.getSum(),
                 getMaxDrawdown(),
                 summaryStatistics.getStandardDeviation()
@@ -219,6 +211,7 @@ public abstract class Strategy {
         for(int i=1;i<=5;i++){
             dayWiseMap.put(i, new ArrayList<>());
         }
+        Long stopLoss = shortStrangleList.get(0).getStopLoss();
         for (ShortStrangle shortStrangle : shortStrangleList) {
             dayWiseMap.get(shortStrangle.getTime().getDayOfWeek()).add(shortStrangle);
         }
@@ -233,7 +226,7 @@ public abstract class Strategy {
             	dayWiseMaxProfitShortStranglesMap.put(day, shortStrangles);
             	dayWiseMaxProfitDrawdownMap.put(day, getMaxDrawdown(shortStrangles));
 			}
-            System.out.printf("%d\t%10.2f\t%10.2f\t%10.2f\n", day, summaryStatistics.getSum(), getMaxDrawdown(shortStrangles), summaryStatistics.getStandardDeviation());
+            System.out.printf("%d\t%10.2f\t%10.2f\t%10.2f\t%10d\n", day, summaryStatistics.getSum(), getMaxDrawdown(shortStrangles), summaryStatistics.getStandardDeviation(), stopLoss);
         }
     }
 
@@ -247,7 +240,7 @@ public abstract class Strategy {
             }
             ShortStrangle shortStrangle = e.getValue().get(0);
             dayWiseMaxProfitDetailsMap.put(e.getKey(),
-                    String.format("%10.2f%10d\t%10d\t%10d", summaryStatistics.getStandardDeviation(), shortStrangle.getMoneyNess(), shortStrangle.getStopLoss(), getTimeFromDateTime(shortStrangle.getTime())));
+                    String.format("%10.2f\t%10d\t%10d", summaryStatistics.getStandardDeviation(), shortStrangle.getStopLoss(), getTimeFromDateTime(shortStrangle.getTime())));
         }
         for(Entry<Integer, Double> e:dayWiseMaxProfitMap.entrySet()){
             System.out.printf("%10d\t%10.2f\t%10.2f\t%30s\n", e.getKey(), e.getValue(), dayWiseMaxProfitDrawdownMap.get(e.getKey()), dayWiseMaxProfitDetailsMap.get(e.getKey()));
