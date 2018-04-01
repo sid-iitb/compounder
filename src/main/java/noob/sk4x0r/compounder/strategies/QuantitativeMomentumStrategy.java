@@ -5,9 +5,12 @@ import noob.sk4x0r.compounder.backtesting.ShortStrangle;
 import noob.sk4x0r.compounder.backtesting.ShortTrade;
 import noob.sk4x0r.compounder.backtesting.Strategy;
 import noob.sk4x0r.compounder.data.CandleStickOptionData;
+import org.apache.commons.lang3.StringUtils;
 import org.joda.time.DateTime;
 import org.joda.time.Days;
 
+import java.awt.peer.ListPeer;
+import java.sql.Array;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -15,90 +18,54 @@ import java.sql.SQLException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-public class IntradayOptionSellingStrategy extends Strategy {
+public class QuantitativeMomentumStrategy extends Strategy {
     static Map<String, List<CandleStickOptionData>> candleStickMap = new HashMap<>();
     public static void main(String[] args) throws Exception {
         ScriptDataCommands.initialize();
-        IntradayOptionSellingStrategy strategy = new IntradayOptionSellingStrategy();
-        strategy.test();
+        QuantitativeMomentumStrategy strategy = new QuantitativeMomentumStrategy();
+        strategy.execute();
     }
 
-    private static final String TABLE_NAME = "options_data";
+    private static final String TABLE_NAME = "nifty500_eod_data";
 
-    protected void test() throws Exception{
+    protected void execute() throws Exception{
                 List<Long> startTimes = new ArrayList<>();
-        for(long i = 940; i <= 1020; i=i+10){
-            if(i%100 < 60){
-                startTimes.add(i);
-            }
-        }
-        List<Long> endTimes = new ArrayList<>();
-        for(long i = 1520; i <= 1520; i=i+10){
-            if(i%100 < 60){
-                endTimes.add(i);
-            }
-        }
-
-        List<Long> stopLosses = new ArrayList<>();
-        for(long i = 125; i <= 200; i=i+10){
-            stopLosses.add(i);
-        }
-
-        List<Long> moneynessList = new ArrayList<>();
-        for(long i = -50000; i <=50000 ; i=i+10000){
-            moneynessList.add(i);
-        }
-
+        List<String> symbols = new ArrayList<>();
         ExecutorService es = Executors.newFixedThreadPool(16);
-        for(long startTime:startTimes){
-            for(long endTime:endTimes){
-                for(long stopLoss:stopLosses) {
-                    for(long moneyness:moneynessList) {
-                        for (boolean squareOffBothPositions : Arrays.asList(false)) {
-                            for(boolean tradeCurrentExpiryOnThursday: Arrays.asList(true)) {
-                                for (boolean tradeOnFriday : Arrays.asList(true)) {
-                                    if (startTime < endTime) {
-                                        es.execute(() -> {
-                                            IntradayOptionSellingStrategy strategy = new IntradayOptionSellingStrategy();
-                                            try {
-                                                strategy.test(startTime, endTime, moneyness, stopLoss, squareOffBothPositions, tradeCurrentExpiryOnThursday, tradeOnFriday);
-//                                                System.out.print(".");
-                                            } catch (Exception e) {
-                                                e.printStackTrace();
-                                            }
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+        try(Connection connection = ScriptDataCommands.getConncection()) {
+            PreparedStatement preparedStatement = connection.prepareStatement("Select distinct symbol from  nifty500");
+            ResultSet resultSet = preparedStatement.executeQuery();
+
+            while (resultSet.next()) {
+                symbols.add(resultSet.getString(1));
             }
         }
+
+        es.execute(() -> {
+            QuantitativeMomentumStrategy strategy = new QuantitativeMomentumStrategy();
+            try {
+                strategy.test(symbols);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
         es.shutdown();
         es.awaitTermination(1000, TimeUnit.DAYS);
-//        System.out.println(".");
-        printDayWiseMaxProfitSummary();
+//        printDayWiseMaxProfitSummary();
 
     }
 
-    protected void test(long startTime,
-                        long endTime,
-                        long moneyness,
-                        long stopLoss,
-                        boolean squareOffBothPositions,
-                        boolean tradeCurrentExpiryOnThursday,
-                        boolean tradeOnFriday) throws Exception {
+    protected void test(List<String> symbols) throws Exception {
         try(Connection connection = ScriptDataCommands.getConncection()) {
             PreparedStatement preparedStatement = connection.prepareStatement("Select distinct date from " + TABLE_NAME + " order by date");
             ResultSet resultSet = preparedStatement.executeQuery();
@@ -106,35 +73,90 @@ public class IntradayOptionSellingStrategy extends Strategy {
             while (resultSet.next()) {
                 dates.add(resultSet.getLong(1));
             }
-            if (!tradeOnFriday) {
-                Iterator<Long> dateIterator = dates.iterator();
-                while (dateIterator.hasNext()) {
-                    Long date = dateIterator.next();
-                    if (getDate(date).getDayOfWeek() == 5) {
-                        dateIterator.remove();
+            dates = selectDates(dates);
+            List<Long>  previousDates;
+            for (int i = 12; i< dates.size()-1; i++) {
+                Map<String, List<Long>> priceListMap = new HashMap<>();
+                Map<String, Long> momentumMap = new HashMap<>();
+                Long date = dates.get(i);
+                previousDates= dates.subList(i-12, i+1);
+                for(String symbol:symbols){
+                    List<Long> priceList = getPriceList(symbol, previousDates);
+                    if(priceList.size()!=13){
+                        continue;
+                    }else{
+                        priceListMap.put(symbol, priceList);
+                        momentumMap.put(symbol, getMomentum(priceList));
                     }
                 }
-            }
-            for (Long date : dates) {
-                List<CandleStickOptionData> calls = getCandles("CE", date, startTime);
-                List<CandleStickOptionData> puts = getCandles("PE", date, startTime);
-                ShortStrangle shortStrangle = getShortStrangle(calls,
-                        puts,
-                        moneyness,
-                        date,
-                        startTime,
-                        endTime,
-                        stopLoss,
-                        squareOffBothPositions,
-                        tradeCurrentExpiryOnThursday);
-                addTrade(shortStrangle);
+                System.out.print(date +": ");
+                System.out.println(sortByValue(momentumMap));
             }
         }
 //        printSummary(startTime, endTime, moneyness, stopLoss, squareOffBothPositions, tradeCurrentExpiryOnThursday, tradeOnFriday);
-        printDayWiseSummary();
+//        printDayWiseSummary();
 //        System.out.println(summarize());
 //        System.out.println(startTime + " " + endTime + " " + premium + " " + stopLoss + " " + squareOffBothPositions + " " + getTotalProfit()/(double)100 + " " + getMaxDrawdown()/(double)100);
-        printTrades();
+//        printTrades();
+    }
+
+    private Long getMomentum(List<Long> priceList) {
+        Double momentum = 1D;
+        int positiveCount = 0;
+        for(int i = 0; i < priceList.size() - 1; i++){
+            if(priceList.get(i) < priceList.get(i+1)){
+                positiveCount ++;
+            }
+            momentum = momentum * (double) priceList.get(i) / (double) priceList.get(i+1);
+        }
+        if(positiveCount < priceList.size() / 2 + 1){
+            return 0L;
+        }
+        momentum = momentum * 100;
+        return momentum.longValue();
+    }
+
+    private List<Long> getPriceList(String symbol, List<Long> previousDates) throws SQLException {
+        try (Connection connection =ScriptDataCommands.getConncection()){
+            String paramStr = StringUtils.join(previousDates.iterator(),",");
+            PreparedStatement preparedStatement = connection.prepareStatement("Select close from "+ TABLE_NAME+" where symbol = ? and date in (" + paramStr + ") order by date");
+            preparedStatement.setString(1, symbol);
+            ResultSet resultSet = preparedStatement.executeQuery();
+            List<Long> priceList = new ArrayList<>();
+            while(resultSet.next()){
+                priceList.add(resultSet.getLong(1));
+            }
+            return priceList;
+        }
+    }
+
+    private List<Long> selectDates(List<Long> dates) {
+        List<Long> selectedDates = new ArrayList<>();
+        int startYear = 2000;
+        int endYear = 2017;
+        for(int year=startYear;year<=endYear;year++){
+            for(int month=1;month<=12;month++){
+                for(int date=1;date<=10;date++){
+                    if(date == 10){
+                        throw new RuntimeException("Data error");
+                    }
+                    StringBuilder sb = new StringBuilder();
+                    sb.append(year);
+                    if(month < 10 ){
+                        sb.append(0);
+                    }
+                    sb.append(month);
+                    sb.append(0);
+                    sb.append(date);
+                    Long dateValue = Long.valueOf(sb.toString());
+                    if(dates.contains(dateValue)){
+                        selectedDates.add(dateValue);
+                        break;
+                    }
+                }
+            }
+        }
+        return selectedDates;
     }
 
     private ShortStrangle getShortStrangle(List<CandleStickOptionData> calls,
@@ -346,5 +368,17 @@ public class IntradayOptionSellingStrategy extends Strategy {
         Date d = new SimpleDateFormat("yyyyMMddHHmm")
                 .parse(String.valueOf(date) + (time < 1000 ? "0" : "") + String.valueOf(time));
         return new DateTime(d);
+    }
+
+    public static <K, V extends Comparable<? super V>> Map<K, V> sortByValue(Map<K, V> map) {
+        List<Map.Entry<K, V>> list = new ArrayList<>(map.entrySet());
+        list.sort((o2, o1) -> o1.getValue().compareTo(o2.getValue()));
+
+        Map<K, V> result = new LinkedHashMap<>();
+        for (Map.Entry<K, V> entry : list) {
+            result.put(entry.getKey(), entry.getValue());
+        }
+
+        return result;
     }
 }
