@@ -247,7 +247,7 @@ public abstract class Strategy {
             }
             ShortStrangle shortStrangle = e.getValue().get(0);
             dayWiseMaxProfitDetailsMap.put(e.getKey(),
-                    String.format("%10.2f%10d\t%10d\t%10d", summaryStatistics.getStandardDeviation(), shortStrangle.getMoneyNess(), shortStrangle.getStopLoss(), getTimeFromDateTime(shortStrangle.getTime())));
+                    String.format("%10.2f%10d\t%10d\t%10d", summaryStatistics.getStandardDeviation(), shortStrangle.getAmount(), shortStrangle.getStopLoss(), getTimeFromDateTime(shortStrangle.getTime())));
         }
         for(Entry<Integer, Double> e:dayWiseMaxProfitMap.entrySet()){
             System.out.printf("%10d\t%10.2f\t%10.2f\t%30s\n", e.getKey(), e.getValue(), dayWiseMaxProfitDrawdownMap.get(e.getKey()), dayWiseMaxProfitDetailsMap.get(e.getKey()));

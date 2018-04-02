@@ -13,7 +13,7 @@ public class ShortStrangle {
     private ShortTrade put;
     private DateTime time;
     private Long stopLoss;
-    private Long moneyNess;
+    private Long amount;
 
     public Double getProfit() {
         return (call.getProfit() + put.getProfit()) / 100d;
