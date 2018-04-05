@@ -5,12 +5,11 @@ import noob.sk4x0r.compounder.backtesting.ShortStrangle;
 import noob.sk4x0r.compounder.backtesting.ShortTrade;
 import noob.sk4x0r.compounder.backtesting.Strategy;
 import noob.sk4x0r.compounder.data.CandleStickOptionData;
+import noob.sk4x0r.compounder.data.Portfolio;
 import org.apache.commons.lang3.StringUtils;
 import org.joda.time.DateTime;
 import org.joda.time.Days;
 
-import java.awt.peer.ListPeer;
-import java.sql.Array;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -20,7 +19,6 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,7 +41,7 @@ public class QuantitativeMomentumStrategy extends Strategy {
         List<String> symbols = new ArrayList<>();
         ExecutorService es = Executors.newFixedThreadPool(16);
         try(Connection connection = ScriptDataCommands.getConncection()) {
-            PreparedStatement preparedStatement = connection.prepareStatement("Select distinct symbol from  nifty500");
+            PreparedStatement preparedStatement = connection.prepareStatement("Select distinct symbol from "+ TABLE_NAME);
             ResultSet resultSet = preparedStatement.executeQuery();
 
             while (resultSet.next()) {
@@ -75,7 +73,8 @@ public class QuantitativeMomentumStrategy extends Strategy {
             }
             dates = selectDates(dates);
             List<Long>  previousDates;
-            for (int i = 12; i< dates.size()-1; i++) {
+            List<Portfolio> portfolioList = new ArrayList<>();
+            for (int i = 12; i< dates.size(); i++) {
                 Map<String, List<Long>> priceListMap = new HashMap<>();
                 Map<String, Long> momentumMap = new HashMap<>();
                 Long date = dates.get(i);
@@ -89,15 +88,50 @@ public class QuantitativeMomentumStrategy extends Strategy {
                         momentumMap.put(symbol, getMomentum(priceList));
                     }
                 }
-                System.out.print(date +": ");
-                System.out.println(sortByValue(momentumMap));
+                momentumMap = sortByValue(momentumMap);
+                //System.out.println(date +": "+momentumMap);
+
+                List<String> topStocks = momentumMap.entrySet().stream()
+                        .limit(10)
+                        .collect(ArrayList::new, (m, e) -> m.add(e.getKey()), ArrayList::addAll);
+                portfolioList.add(Portfolio.builder()
+                        .entryDate(date)
+                        .exitDate(dates.size() > i+12 ? dates.get(i+12) : dates.get(dates.size()-1))
+                        .stocks(topStocks)
+                        .build());
+            }
+            for(Portfolio portfolio:portfolioList) {
+                portfolio.setProfit(getProfit(portfolio));
+                System.out.println(portfolio);
             }
         }
-//        printSummary(startTime, endTime, moneyness, stopLoss, squareOffBothPositions, tradeCurrentExpiryOnThursday, tradeOnFriday);
-//        printDayWiseSummary();
-//        System.out.println(summarize());
-//        System.out.println(startTime + " " + endTime + " " + premium + " " + stopLoss + " " + squareOffBothPositions + " " + getTotalProfit()/(double)100 + " " + getMaxDrawdown()/(double)100);
-//        printTrades();
+    }
+
+    private Long getProfit(Portfolio portfolio) throws SQLException {
+        Long profit = 0L;
+        for(String stock:portfolio.getStocks()){
+            profit = profit + getProfit(stock, portfolio.getEntryDate(), portfolio.getExitDate());
+        }
+        return profit;
+    }
+
+    private Long getProfit(String stock, Long entryDate, Long exitDate) throws SQLException {
+        Long entryPrice = getPrice(stock, entryDate);
+        Long exitPrice = getPrice(stock, exitDate);
+        return 100000/entryPrice * (exitPrice - entryPrice);
+    }
+
+    private Long getPrice(String stock, Long date) throws SQLException {
+        try (Connection connection =ScriptDataCommands.getConncection()){
+            PreparedStatement preparedStatement = connection.prepareStatement("Select close from "+ TABLE_NAME+" where symbol = ? and date = ?");
+            preparedStatement.setString(1, stock);
+            preparedStatement.setLong(2, date);
+            ResultSet resultSet = preparedStatement.executeQuery();
+            if(resultSet.next()){
+                return resultSet.getLong(1);
+            }
+            return -1L;
+        }
     }
 
     private Long getMomentum(List<Long> priceList) {
@@ -107,7 +141,7 @@ public class QuantitativeMomentumStrategy extends Strategy {
             if(priceList.get(i) < priceList.get(i+1)){
                 positiveCount ++;
             }
-            momentum = momentum * (double) priceList.get(i) / (double) priceList.get(i+1);
+            momentum = momentum * (double) priceList.get(i+1) / (double) priceList.get(i);
         }
         if(positiveCount < priceList.size() / 2 + 1){
             return 0L;

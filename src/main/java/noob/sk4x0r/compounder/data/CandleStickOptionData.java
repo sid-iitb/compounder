@@ -1,15 +1,9 @@
 package noob.sk4x0r.compounder.data;
 
-import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
-import lombok.EqualsAndHashCode;
-import lombok.NoArgsConstructor;
 import lombok.ToString;
 import org.joda.time.DateTime;
-
-import java.sql.Time;
-import java.util.Date;
 
 @Data
 @ToString(callSuper = true)

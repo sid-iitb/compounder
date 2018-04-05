@@ -1,7 +1,6 @@
 package noob.sk4x0r.compounder;
 
 import com.mchange.v2.c3p0.ComboPooledDataSource;
-import noob.sk4x0r.compounder.data.CandleStickData;
 
 import java.beans.PropertyVetoException;
 import java.sql.Connection;
