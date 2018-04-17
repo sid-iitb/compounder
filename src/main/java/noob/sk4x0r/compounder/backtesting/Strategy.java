@@ -3,7 +3,9 @@ package noob.sk4x0r.compounder.backtesting;
 import org.apache.commons.math3.stat.descriptive.SummaryStatistics;
 import org.joda.time.DateTime;
 
+import java.time.DayOfWeek;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -12,17 +14,33 @@ import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 public abstract class Strategy {
-
-	static Map<Integer, List<ShortStrangle>> dayWiseMaxProfitShortStranglesMap = new ConcurrentHashMap<>();
-	static Map<Integer, Double> dayWiseMaxProfitDrawdownMap = new ConcurrentHashMap<>();
-	static Map<Integer, Double> dayWiseMaxProfitMap = new ConcurrentHashMap<>();
-	static {
-		for(int i=1;i<=5;i++){
-			dayWiseMaxProfitMap.put(i, -1000000D);
-		}
-	}
-
 	List<ShortStrangle> shortStrangleList = new ArrayList<>();
+
+
+	public void printDetails(){
+        shortStrangleList.sort((a, b) -> a.getTime().isBefore(b.getTime()) ? -1 : a.getTime().isAfter(b.getTime()) ? 1 : 0);
+        Map<Integer, List<ShortStrangle>> dayWiseShortStranglesMap = new HashMap<>();
+		Double maxDrawDown = getMaxDrawdown(shortStrangleList);
+        System.out.println("Max drawdown: " + getMaxDrawdown(shortStrangleList));
+        SummaryStatistics summaryStatistics2 = new SummaryStatistics();
+        shortStrangleList.forEach(shortStrangle -> summaryStatistics2.addValue(shortStrangle.getProfit()));
+        System.out.println("Profit: " + summaryStatistics2.getSum());
+		System.out.println("StopLoss: " + shortStrangleList.get(0).getStopLoss());
+		System.out.println("Profit to max drawdown ratio: " + summaryStatistics2.getSum()/maxDrawDown);
+        System.out.println("Std: " + summaryStatistics2.getStandardDeviation());
+
+        for(ShortStrangle shortStrangle: shortStrangleList){
+            dayWiseShortStranglesMap.computeIfAbsent(shortStrangle.getTime().getDayOfWeek(), k -> new ArrayList<>());
+            dayWiseShortStranglesMap.get(shortStrangle.getTime().getDayOfWeek()).add(shortStrangle);
+        }
+        for(int key: dayWiseShortStranglesMap.keySet()){
+            List<ShortStrangle> dayWiseShortStrangleList = dayWiseShortStranglesMap.get(key);
+            SummaryStatistics summaryStatistics = new SummaryStatistics();
+            dayWiseShortStrangleList.forEach(shortStrangle -> summaryStatistics.addValue(shortStrangle.getProfit()));
+            System.out.printf("%20d%20.2f%20.2f%20.2f\n", key, summaryStatistics.getSum(), getMaxDrawdown(dayWiseShortStrangleList), summaryStatistics.getStandardDeviation());
+        }
+    }
+
 
 	protected void addTrade(ShortStrangle shortStrangle)
 	{
@@ -31,15 +49,15 @@ public abstract class Strategy {
         }
 	}
 
-	public Double getMaxDrawdown()
+	public Double getMaxDrawdown(List<ShortStrangle> shortStrangles)
 	{
 		Double maxProfit = 0D;
 		Double totalProfit = 0D;
 		Double maxDrawdown = 0D;
-        if(null == shortStrangleList || shortStrangleList.isEmpty()){
+        if(null == shortStrangles || shortStrangles.isEmpty()){
             return maxDrawdown;
         }
-		for (ShortStrangle shortStrangle: shortStrangleList) {
+		for (ShortStrangle shortStrangle: shortStrangles) {
 			totalProfit += shortStrangle.getProfit();
 			if(totalProfit > maxProfit)
 			{
@@ -52,28 +70,6 @@ public abstract class Strategy {
 		}
 		return maxDrawdown;
 	}
-
-    public Double getMaxDrawdown(List<ShortStrangle> shortStrangleList)
-    {
-        Double maxProfit = 0D;
-        Double totalProfit = 0D;
-        Double maxDrawdown = 0D;
-        if(null == shortStrangleList || shortStrangleList.isEmpty()){
-            return maxDrawdown;
-        }
-        for (ShortStrangle shortStrangle: shortStrangleList) {
-            totalProfit += shortStrangle.getProfit();
-            if(totalProfit > maxProfit)
-            {
-                maxProfit = totalProfit;
-            }
-            if(maxDrawdown < (maxProfit - totalProfit))
-            {
-                maxDrawdown = maxProfit - totalProfit;
-            }
-        }
-        return maxDrawdown;
-    }
 	
 	private Double getCurrentDrawdown()
 	{
@@ -177,22 +173,6 @@ public abstract class Strategy {
         }
 	}
 
-    public void printSummary(long startTime,
-                             long endTime,
-                             long stopLoss){
-        SummaryStatistics summaryStatistics = new SummaryStatistics();
-        for (ShortStrangle shortStrangle : shortStrangleList) {
-            summaryStatistics.addValue(shortStrangle.getProfit());
-        }
-        System.out.printf("%5d\t%5d\t%3d\t%10.2f\t%10.2f\t%10.2f\n",
-                startTime,
-                endTime,
-                stopLoss,
-                summaryStatistics.getSum(),
-                getMaxDrawdown(),
-                summaryStatistics.getStandardDeviation()
-        );
-    }
     private long getDate(DateTime dateTime) {
         return Long.parseLong(String.valueOf(dateTime.getYear())
                 + (dateTime.getMonthOfYear() < 10 ? "0": "") + String.valueOf(dateTime.getMonthOfYear())
@@ -203,47 +183,6 @@ public abstract class Strategy {
     public void printTrades() {
         for(ShortStrangle shortStrangle:shortStrangleList){
             System.out.println(getDate(shortStrangle.getTime())+"\t"+shortStrangle.getProfit());
-        }
-    }
-
-    public void printDayWiseSummary(){
-        Map<Integer, List<ShortStrangle>> dayWiseMap = new TreeMap<>();
-        for(int i=1;i<=5;i++){
-            dayWiseMap.put(i, new ArrayList<>());
-        }
-        Long stopLoss = shortStrangleList.get(0).getStopLoss();
-        for (ShortStrangle shortStrangle : shortStrangleList) {
-            dayWiseMap.get(shortStrangle.getTime().getDayOfWeek()).add(shortStrangle);
-        }
-        for(int day:dayWiseMap.keySet()){
-            SummaryStatistics summaryStatistics = new SummaryStatistics();
-            List<ShortStrangle> shortStrangles = dayWiseMap.get(day);
-            for(ShortStrangle shortStrangle:shortStrangles){
-                summaryStatistics.addValue(shortStrangle.getProfit());
-            }
-            if(summaryStatistics.getSum() > dayWiseMaxProfitMap.get(day)){
-            	dayWiseMaxProfitMap.put(day, summaryStatistics.getSum());
-            	dayWiseMaxProfitShortStranglesMap.put(day, shortStrangles);
-            	dayWiseMaxProfitDrawdownMap.put(day, getMaxDrawdown(shortStrangles));
-			}
-            System.out.printf("%d\t%10.2f\t%10.2f\t%10.2f\t%10d\n", day, summaryStatistics.getSum(), getMaxDrawdown(shortStrangles), summaryStatistics.getStandardDeviation(), stopLoss);
-        }
-    }
-
-    public static void printDayWiseMaxProfitSummary(){
-        System.out.println("Max profit summary");
-        Map<Integer, String> dayWiseMaxProfitDetailsMap = new TreeMap<>();
-        for(Entry<Integer, List<ShortStrangle>> e: dayWiseMaxProfitShortStranglesMap.entrySet()){
-            SummaryStatistics summaryStatistics = new SummaryStatistics();
-            for(ShortStrangle shortStrangle: e.getValue()){
-                summaryStatistics.addValue(shortStrangle.getProfit());
-            }
-            ShortStrangle shortStrangle = e.getValue().get(0);
-            dayWiseMaxProfitDetailsMap.put(e.getKey(),
-                    String.format("%10.2f\t%10d\t%10d", summaryStatistics.getStandardDeviation(), shortStrangle.getStopLoss(), getTimeFromDateTime(shortStrangle.getTime())));
-        }
-        for(Entry<Integer, Double> e:dayWiseMaxProfitMap.entrySet()){
-            System.out.printf("%10d\t%10.2f\t%10.2f\t%30s\n", e.getKey(), e.getValue(), dayWiseMaxProfitDrawdownMap.get(e.getKey()), dayWiseMaxProfitDetailsMap.get(e.getKey()));
         }
     }
 
@@ -285,7 +224,7 @@ public abstract class Strategy {
         stringBuffer.append(String.format("%-20s%10.2f\n", "Percent profit", getPercentProfitable()));
         stringBuffer.append(String.format("%-20s%10.2f\n", "Max   Profit", summaryStatistics.getMax()));
 		stringBuffer.append(String.format("%-20s%10.2f\n", "Max   Loss", summaryStatistics.getMin()));
-		stringBuffer.append(String.format("%-20s%10.2f\n", "max drawdown", getMaxDrawdown()));
+		stringBuffer.append(String.format("%-20s%10.2f\n", "max drawdown", getMaxDrawdown(shortStrangleList)));
 		stringBuffer.append(String.format("%-20s%10.2f\n", "Current drawdown", getCurrentDrawdown()));
 		stringBuffer.append(String.format("%-20s%10d\n", "Max cons loss", maxConsLossCount));
 		stringBuffer.append(String.format("%-20s%10d\n", "Max cons Profit", maxConsProfCount));

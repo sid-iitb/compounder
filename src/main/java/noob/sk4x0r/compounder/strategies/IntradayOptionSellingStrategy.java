@@ -37,7 +37,7 @@ public class IntradayOptionSellingStrategy extends Strategy {
 
     protected void test() throws Exception{
                 List<Long> startTimes = new ArrayList<>();
-        for(long i = 950; i <= 1010; i=i+10){
+        for(long i = 1000; i <= 1000; i=i+10){
             if(i%100 < 60){
                 startTimes.add(i);
             }
@@ -50,43 +50,65 @@ public class IntradayOptionSellingStrategy extends Strategy {
         }
 
         List<Long> stopLosses = new ArrayList<>();
-        for(long i = 110; i <= 200; i=i+5){
+        for(long i = 120; i <= 170; i=i+10){
             stopLosses.add(i);
         }
-
-        ExecutorService es = Executors.newFixedThreadPool(16);
-        for (long startTime : startTimes) {
-            for (long endTime : endTimes) {
-                for (long stopLoss : stopLosses) {
-                            if (startTime < endTime) {
-                                es.execute(() -> {
-                                    IntradayOptionSellingStrategy strategy = new IntradayOptionSellingStrategy();
-                                    try {
-                                        strategy.test(startTime, endTime, stopLoss);
-                                    } catch (Exception e) {
-                                        e.printStackTrace();
-                                    }
-                                });
-                            }
-                }
-            }
+        List<Long> moneyNessList = new ArrayList<>();
+        for(long i = 0; i <= 400; i=i+100){
+            moneyNessList.add(i);
         }
-        es.shutdown();
-        es.awaitTermination(1000, TimeUnit.DAYS);
-//        System.out.println(".");
-        printDayWiseMaxProfitSummary();
 
+        for(long stopLoss:stopLosses) {
+            IntradayOptionSellingStrategy strategy = new IntradayOptionSellingStrategy();
+            strategy.test(1000, 1520, stopLoss, 0);
+//            strategy.test(1000, 1520, stopLoss, 100);
+//            strategy.test(1000, 1520, stopLoss, -100);
+//            strategy.test(1000, 1520, stopLoss, -200);
+//            strategy.test(1000, 1520, stopLoss, -300);
+            strategy.printDetails();
+            strategy.summarize();
+        }
+//        ExecutorService es = Executors.newFixedThreadPool(16);
+//        for (long startTime : startTimes) {
+//            for (long endTime : endTimes) {
+//                for (long stopLoss : stopLosses) {
+//                    for(long moneyNess:moneyNessList)
+//                            if (startTime < endTime) {
+//                                es.execute(() -> {
+//                                    IntradayOptionSellingStrategy strategy = new IntradayOptionSellingStrategy();
+//                                    strategy.test(1000, 1520, 5000, );
+//                                    try {
+//                                        strategy.test(startTime, endTime, stopLoss, moneyNess);
+//                                        IntradayOptionSellingStrategy strategy = new IntradayOptionSellingStrategy();
+//                                        strategy.test(1000, 1520, 5000, 0);
+//                                        strategy.test(1000, 1520, 5000, 100);
+//                                        strategy.test(1000, 1520, 5000, 200);
+//                                    } catch (Exception e) {
+//                                        e.printStackTrace();
+//                                    }
+//                                });
+//                            }
+//                }
+//            }
+//        }
+//        es.shutdown();
+//        es.awaitTermination(1000, TimeUnit.DAYS);
+//        System.out.println(".");
+//        strategy.printDetails();
     }
 
     protected void test(long startTime,
                         long endTime,
-                        long stopLoss) throws Exception {
+                        long stopLoss,
+                        long moneyNess) throws Exception {
         try(Connection connection = ScriptDataCommands.getConncection()) {
             PreparedStatement preparedStatement = connection.prepareStatement("Select distinct date from " + TABLE_NAME + " order by date");
             ResultSet resultSet = preparedStatement.executeQuery();
             List<Long> dates = new ArrayList<>();
             while (resultSet.next()) {
-                dates.add(resultSet.getLong(1));
+                if(getDate(resultSet.getLong(1)).getDayOfWeek() != 5) {
+                    dates.add(resultSet.getLong(1));
+                }
             }
             for (Long date : dates) {
                 List<CandleStickOptionData> calls = getCandles("CE", date, startTime);
@@ -96,15 +118,11 @@ public class IntradayOptionSellingStrategy extends Strategy {
                         date,
                         startTime,
                         endTime,
-                        stopLoss);
+                        stopLoss,
+                        moneyNess);
                 addTrade(shortStrangle);
             }
         }
-//        printSummary(startTime, endTime, stopLoss);
-        printDayWiseSummary();
-//        System.out.println(summarize());
-//        System.out.println(startTime + " " + endTime + " " + premium + " " + stopLoss + " " + squareOffBothPositions + " " + getTotalProfit()/(double)100 + " " + getMaxDrawdown()/(double)100);
-        //printTrades();
     }
 
     private ShortStrangle getShortStrangle(List<CandleStickOptionData> calls,
@@ -112,9 +130,10 @@ public class IntradayOptionSellingStrategy extends Strategy {
                                            long date,
                                            long startTime,
                                            long endTime,
-                                           long stopLoss) throws SQLException, ParseException {
-        ShortTrade putTrade = getTrade(puts, date, startTime, endTime, stopLoss);
-        ShortTrade callTrade = getTrade(calls, date, startTime, endTime, stopLoss);
+                                           long stopLoss,
+                                           long moneyNess) throws SQLException, ParseException {
+        ShortTrade putTrade = getTrade(puts, date, startTime, endTime, stopLoss, -1 * moneyNess);
+        ShortTrade callTrade = getTrade(calls, date, startTime, endTime, stopLoss, moneyNess);
         if(null == putTrade || null == callTrade){
             return null;
         }
@@ -123,6 +142,7 @@ public class IntradayOptionSellingStrategy extends Strategy {
                 .put(putTrade)
                 .stopLoss(stopLoss)
                 .time(getDateTime(date, startTime))
+                .moneyNess(moneyNess)
                 .build();
     }
 
@@ -135,7 +155,8 @@ public class IntradayOptionSellingStrategy extends Strategy {
                                 long date,
                                 long startTime,
                                 long endTime,
-                                long stopLoss) throws SQLException, ParseException {
+                                long stopLoss,
+                                long moneyNess) throws SQLException, ParseException {
         if(candles.size() == 0){
             return null;
         }
@@ -165,6 +186,7 @@ public class IntradayOptionSellingStrategy extends Strategy {
                 strikePrice = (bankNifty - (bankNifty % 10000) + 10000)/100;
             }
 
+            strikePrice = strikePrice + moneyNess;
             for (CandleStickOptionData candle : candles) {
                 if (strikePrice.longValue() == candle.getStrikePrice().longValue() && isValidExpiry(candle)) {
                     openingTrade = candle;
@@ -207,8 +229,8 @@ public class IntradayOptionSellingStrategy extends Strategy {
                 nextCandles.add(nextCandle);
             }
             for (CandleStickOptionData candle : nextCandles) {
-                if (candle.getHigh() > stopLoss * openingTrade.getClose() / 100) {
-                    closingTradePrice = stopLoss * openingTrade.getClose() / 100;
+                if (candle.getHigh() >= openingTrade.getClose() * stopLoss / 100){
+                    closingTradePrice = openingTrade.getClose() * stopLoss / 100;
                     closingTradeDateTime = candle.getDateTime();
                     break;
                 } else if (getTimeFromDateTime(candle.getDateTime()) == endTime) {
