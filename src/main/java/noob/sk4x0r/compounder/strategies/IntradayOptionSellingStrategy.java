@@ -61,9 +61,9 @@ public class IntradayOptionSellingStrategy extends Strategy {
         for(long stopLoss:stopLosses) {
             IntradayOptionSellingStrategy strategy = new IntradayOptionSellingStrategy();
             strategy.test(1000, 1520, stopLoss, 0);
-//            strategy.test(1000, 1520, stopLoss, 100);
-//            strategy.test(1000, 1520, stopLoss, -100);
-//            strategy.test(1000, 1520, stopLoss, -200);
+            strategy.test(1000, 1520, stopLoss, 100);
+            strategy.test(1000, 1520, stopLoss, -100);
+            strategy.test(1000, 1520, stopLoss, -200);
 //            strategy.test(1000, 1520, stopLoss, -300);
             strategy.printDetails();
             strategy.summarize();
@@ -228,9 +228,10 @@ public class IntradayOptionSellingStrategy extends Strategy {
                         .build();
                 nextCandles.add(nextCandle);
             }
+            long stopLossPrice = Math.min(openingTrade.getClose() * stopLoss / 100, openingTrade.getClose() + 5000);
             for (CandleStickOptionData candle : nextCandles) {
-                if (candle.getHigh() >= openingTrade.getClose() * stopLoss / 100){
-                    closingTradePrice = openingTrade.getClose() * stopLoss / 100;
+                if (candle.getHigh() >= stopLossPrice){
+                    closingTradePrice = stopLossPrice;
                     closingTradeDateTime = candle.getDateTime();
                     break;
                 } else if (getTimeFromDateTime(candle.getDateTime()) == endTime) {
